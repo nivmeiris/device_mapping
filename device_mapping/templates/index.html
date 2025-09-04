@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Device Model Lookup</title>
+    <style>
+        body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif; max-width: 800px; margin: auto; padding: 20px; background-color: #f4f4f9; color: #333; }
+        h1, h2 { color: #444; border-bottom: 2px solid #ddd; padding-bottom: 5px;}
+        .container {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 25px;
+            position: relative; /* Required for positioning the custom dropdown */
+        }
+        input, textarea, button { font-size: 1em; padding: 10px; border-radius: 5px; border: 1px solid #ccc; margin-right: 5px; }
+        button { background-color: #007bff; color: white; border: none; cursor: pointer; transition: background-color 0.2s; }
+        button:hover { background-color: #0056b3; }
+        .clear-btn { background-color: #6c757d; }
+        .clear-btn:hover { background-color: #5a6268; }
+        .copy-btn { background-color: #28a745; }
+        .copy-btn:hover { background-color: #218838; }
+        .result-box { margin-top: 15px; padding: 10px; border: 1px solid #ccc; background-color: #f9f9f9; min-height: 50px; white-space: pre-wrap; font-family: monospace; border-radius: 5px; }
+        footer { margin-top: 30px; text-align: center; color: #777; font-size: 0.9em; }
+
+        /* ========= NEW CSS FOR CUSTOM DROPDOWN ========= */
+        #custom-suggestions {
+            display: none; /* Hidden by default */
+            position: absolute;
+            border: 1px solid #ddd;
+            background-color: white;
+            width: calc(100% - 42px); /* Match the container width */
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000; /* Appear on top of other content */
+            border-radius: 0 0 5px 5px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .suggestion-item {
+            padding: 10px;
+            cursor: pointer;
+        }
+        .suggestion-item:hover {
+            background-color: #f0f0f0;
+        }
+        /* =============================================== */
+    </style>
+</head>
+<body>
+    <h1>Device Model Lookup</h1>
+
+    <div class="container">
+        <h2>Single Device Lookup</h2>
+        <input type="text" id="queryInput" placeholder="e.g., iPhone 15 Pro Max" size="40" autocomplete="off">
+
+        <div id="custom-suggestions"></div>
+
+        <br><br>
+        <button onclick="performLookup('model')">Search Model (Name -> Model)</button>
+        <button onclick="performLookup('name')">Search Name (Model -> Name)</button>
+        <button class="clear-btn" onclick="clearSingle()">Clear</button>
+        <div id="single-results" class="result-box"></div>
+    </div>
+
+    <div class="container">
+        <h2>Batch Device Lookup</h2>
+        <textarea id="batch-input" rows="8" style="width: 98%;" placeholder="Paste list here, e.g.:&#10;iPhone 14 Pro Max&#10;SM-S908U&#10;iPhone16,2"></textarea>
+        <br><br>
+        <button onclick="performBatchLookup()">Run Batch Lookup</button>
+        <button class="copy-btn" onclick="copyToClipboard('models')">Copy All Found Models</button>
+        <button class="copy-btn" onclick="copyToClipboard('names')">Copy All Found Names</button>
+        <button class="clear-btn" onclick="clearBatch()">Clear Batch</button>
+        <div id="batch-results" class="result-box"></div>
+    </div>
+
+    <footer id="status-bar">Loading data...</footer>
+
+    <script>
+        let lastBatchModels = [];
+        let lastBatchNames = [];
+        let allSuggestions = [];
+        const statusBar = document.getElementById('status-bar');
+        const queryInput = document.getElementById('queryInput');
+        const suggestionsContainer = document.getElementById('custom-suggestions');
+
+        window.onload = async function() {
+            try {
+                const response = await fetch('/suggestions');
+                allSuggestions = await response.json();
+                updateStatus(`Data loaded with ${allSuggestions.length} suggestions. Ready.`);
+            } catch (error) {
+                console.error("A critical error occurred while fetching suggestions:", error);
+                updateStatus("Error loading suggestions.");
+            }
+        };
+
+        queryInput.addEventListener('input', function(e) {
+            const inputText = e.target.value.toLowerCase();
+            suggestionsContainer.innerHTML = ''; // Clear previous suggestions
+
+            if (inputText.length < 2) {
+                suggestionsContainer.style.display = 'none'; // Hide if input is too short
+                return;
+            }
+
+            const filteredSuggestions = allSuggestions.filter(item =>
+                item.toLowerCase().includes(inputText)
+            );
+
+            const suggestionsToShow = filteredSuggestions.slice(0, 20);
+
+            if (suggestionsToShow.length === 0) {
+                suggestionsContainer.style.display = 'none'; // Hide if no matches
+                return;
+            }
+
+            suggestionsToShow.forEach(item => {
+                const div = document.createElement('div');
+                div.className = 'suggestion-item';
+                div.textContent = item;
+                // Add click event to each suggestion item
+                div.addEventListener('click', function() {
+                    queryInput.value = item; // Put the clicked text into the input box
+                    suggestionsContainer.style.display = 'none'; // Hide the dropdown
+                    suggestionsContainer.innerHTML = '';
+                });
+                suggestionsContainer.appendChild(div);
+            });
+
+            suggestionsContainer.style.display = 'block'; // Show the dropdown
+        });
+
+        // Hide dropdown if user clicks elsewhere on the page
+        document.addEventListener('click', function(e) {
+            if (e.target !== queryInput && e.target.parentNode !== suggestionsContainer) {
+                suggestionsContainer.style.display = 'none';
+            }
+        });
+
+        // --- Other Functions (No changes below this line) ---
+        async function performLookup(searchType) {
+            const query = document.getElementById('queryInput').value;
+            const resultsDiv = document.getElementById('single-results');
+            if (!query) { resultsDiv.textContent = 'Please enter a device name or model.'; return; }
+            updateStatus(`Searching for '${query}'...`);
+            const response = await fetch(`/lookup?query=${encodeURIComponent(query)}&type=${searchType}`);
+            const data = await response.json();
+            let output = data.message;
+            if (data.status === 'success' && data.items.length > 0) { output += '\n' + data.items.join('\n'); }
+            resultsDiv.textContent = output;
+            updateStatus("Single search complete.");
+        }
+
+        function clearSingle() {
+            document.getElementById('queryInput').value = '';
+            document.getElementById('single-results').textContent = '';
+            suggestionsContainer.style.display = 'none';
+            updateStatus("Single search cleared.");
+        }
+
+        async function performBatchLookup() {
+            const batchInput = document.getElementById('batch-input').value.trim();
+            const resultsDiv = document.getElementById('batch-results');
+            if (!batchInput) { resultsDiv.textContent = 'Batch input is empty.'; return; }
+            const queries = batchInput.split('\n').filter(line => line.trim() !== '');
+            updateStatus(`Running batch lookup for ${queries.length} items...`);
+            const response = await fetch('/batch_lookup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ queries: queries })
+            });
+            const data = await response.json();
+            resultsDiv.textContent = data.results_text;
+            lastBatchModels = data.found_models;
+            lastBatchNames = data.found_names;
+            updateStatus(`Batch complete. Found ${lastBatchModels.length} unique models and ${lastBatchNames.length} unique names.`);
+        }
+
+        function clearBatch() {
+            document.getElementById('batch-input').value = '';
+            document.getElementById('batch-results').textContent = '';
+            lastBatchModels = [];
+            lastBatchNames = [];
+            updateStatus("Batch search cleared.");
+        }
+
+        function copyToClipboard(type) {
+            const dataToCopy = (type === 'models') ? lastBatchModels : lastBatchNames;
+            if (dataToCopy.length === 0) { updateStatus(`No ${type} to copy. Run a batch search first.`); return; }
+            const textToCopy = dataToCopy.join(',');
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                updateStatus(`Copied ${dataToCopy.length} unique ${type} to clipboard.`);
+            }, (err) => {
+                updateStatus('Failed to copy text.');
+                console.error('Clipboard copy failed: ', err);
+            });
+        }
+
+        function updateStatus(message) {
+            statusBar.textContent = message;
+        }
+    </script>
+</body>
+</html>
